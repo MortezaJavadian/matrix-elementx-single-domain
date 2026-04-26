@@ -191,8 +191,16 @@ fi
 LIVEKIT_URL_PATH="/livekit/sfu"
 LIVEKIT_JWT_BASE_PATH="/livekit/jwt"
 
-LIVEKIT_TURN_ENABLED="false"
+LIVEKIT_TURN_ENABLED="true"
+LIVEKIT_TURN_UDP_PORT="3478"
+LIVEKIT_TURN_TLS_PORT="5349"
+LIVEKIT_TURN_RELAY_RANGE_START="50502"
+LIVEKIT_TURN_RELAY_RANGE_END="50601"
+# Path on HOST to the certs directory containing live/ and archive/ subdirs (mounted read-only into livekit container).
+LIVEKIT_TLS_CERT_DIR="/root/nginx-proxy/certs"
 LIVEKIT_USE_EXTERNAL_IP="false"
+LIVEKIT_RTC_ALLOW_TCP_FALLBACK="true"
+LIVEKIT_RTC_STRICT_ACKS="false"
 LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR="true"
 LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR="true"
 LIVEKIT_RECONNECT_ON_DATA_CHANNEL_ERROR="true"
@@ -594,7 +602,14 @@ LIVEKIT_SECRET_KEY=${LK_SECRET}
 LIVEKIT_URL=wss://${MATRIX_DOMAIN}${LIVEKIT_URL_PATH}
 LIVEKIT_JWT_BASE_URL=https://${MATRIX_DOMAIN}${LIVEKIT_JWT_BASE_PATH}
 LIVEKIT_TURN_ENABLED=${LIVEKIT_TURN_ENABLED}
+LIVEKIT_TURN_UDP_PORT=${LIVEKIT_TURN_UDP_PORT}
+LIVEKIT_TURN_TLS_PORT=${LIVEKIT_TURN_TLS_PORT}
+LIVEKIT_TURN_RELAY_RANGE_START=${LIVEKIT_TURN_RELAY_RANGE_START}
+LIVEKIT_TURN_RELAY_RANGE_END=${LIVEKIT_TURN_RELAY_RANGE_END}
+LIVEKIT_TLS_CERT_DIR=${LIVEKIT_TLS_CERT_DIR}
 LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}
+LIVEKIT_RTC_ALLOW_TCP_FALLBACK=${LIVEKIT_RTC_ALLOW_TCP_FALLBACK}
+LIVEKIT_RTC_STRICT_ACKS=${LIVEKIT_RTC_STRICT_ACKS}
 LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR=${LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR}
 LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR=${LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR}
 LIVEKIT_RECONNECT_ON_DATA_CHANNEL_ERROR=${LIVEKIT_RECONNECT_ON_DATA_CHANNEL_ERROR}
@@ -749,9 +764,13 @@ services:
     command: ["--config", "/etc/livekit/config.yaml", "--node-ip", "\${SERVER_IP}"]
     volumes:
       - \${LIVEKIT_DATA_PATH}:/etc/livekit:ro
+      - \${LIVEKIT_TLS_CERT_DIR}:/etc/lk-certs:ro
     ports:
       - "\${LIVEKIT_TCP_PORT}:\${LIVEKIT_TCP_PORT}/tcp"
       - "\${LIVEKIT_RTC_PORT_RANGE_START}-\${LIVEKIT_RTC_PORT_RANGE_END}:\${LIVEKIT_RTC_PORT_RANGE_START}-\${LIVEKIT_RTC_PORT_RANGE_END}/udp"
+      - "\${LIVEKIT_TURN_UDP_PORT}:\${LIVEKIT_TURN_UDP_PORT}/udp"
+      - "\${LIVEKIT_TURN_TLS_PORT}:\${LIVEKIT_TURN_TLS_PORT}/tcp"
+      - "\${LIVEKIT_TURN_RELAY_RANGE_START}-\${LIVEKIT_TURN_RELAY_RANGE_END}:\${LIVEKIT_TURN_RELAY_RANGE_START}-\${LIVEKIT_TURN_RELAY_RANGE_END}/udp"
     networks:
       matrix-internal:
         aliases:
@@ -1089,14 +1108,36 @@ rtc:
   port_range_start: ${LIVEKIT_RTC_PORT_RANGE_START}
   port_range_end: ${LIVEKIT_RTC_PORT_RANGE_END}
   use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP}
+  # Allow ICE/TCP fallback via tcp_port when direct UDP fails (critical for mobile NAT).
+  allow_tcp_fallback: ${LIVEKIT_RTC_ALLOW_TCP_FALLBACK}
+  # Relax strict DTLS ACK to reduce spurious PEER_CONNECTION_DISCONNECTED errors.
+  strict_acks: ${LIVEKIT_RTC_STRICT_ACKS}
   reconnect_on_publication_error: ${LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR}
   reconnect_on_subscription_error: ${LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR}
   reconnect_on_data_channel_error: ${LIVEKIT_RECONNECT_ON_DATA_CHANNEL_ERROR}
 
 turn:
   enabled: ${LIVEKIT_TURN_ENABLED}
-  # Single-domain profile with an external nginx container: do not bind
-  # UDP/TCP 443 here. Media uses the configured UDP range and TCP fallback.
+  domain: ${MATRIX_DOMAIN}
+  udp_port: ${LIVEKIT_TURN_UDP_PORT}
+  # TURNS (TURN over TLS/TCP): far more reliable than UDP for mobile carrier NAT.
+  tls_port: ${LIVEKIT_TURN_TLS_PORT}
+  relay_range_start: ${LIVEKIT_TURN_RELAY_RANGE_START}
+  relay_range_end: ${LIVEKIT_TURN_RELAY_RANGE_END}
+  external_tls: false
+  # Let's Encrypt certs from nginx-proxy host, mounted read-only at /etc/lk-certs (see docker-compose volumes).
+  cert_file: /etc/lk-certs/live/${MATRIX_DOMAIN}/fullchain.pem
+  key_file: /etc/lk-certs/live/${MATRIX_DOMAIN}/privkey.pem
+
+# Improve reconnection reliability for mobile clients (ref: github.com/livekit/livekit-server/issues/3475)
+signal_relay:
+  retry_timeout: 60s
+  min_retry_interval: 500ms
+  max_retry_interval: 5s
+  stream_buffer_size: 1000000
+
+room:
+  empty_timeout: 300
 
 keys:
   ${LK_API_KEY}: "${LK_SECRET}"
@@ -1895,6 +1936,12 @@ grep -q "\"use_exclusively\": true" data/element-web/config.json
 grep -q "^LIVEKIT_URL=wss://${MATRIX_DOMAIN}${LIVEKIT_URL_PATH}$" .env
 grep -q "^LIVEKIT_JWT_BASE_URL=https://${MATRIX_DOMAIN}${LIVEKIT_JWT_BASE_PATH}$" .env
 grep -q "^LIVEKIT_TURN_ENABLED=${LIVEKIT_TURN_ENABLED}$" .env
+grep -q "^LIVEKIT_TURN_UDP_PORT=${LIVEKIT_TURN_UDP_PORT}$" .env
+grep -q "^LIVEKIT_TURN_RELAY_RANGE_START=${LIVEKIT_TURN_RELAY_RANGE_START}$" .env
+grep -q "^LIVEKIT_TURN_RELAY_RANGE_END=${LIVEKIT_TURN_RELAY_RANGE_END}$" .env
+grep -q "^LIVEKIT_TLS_CERT_DIR=" .env
+grep -q "^LIVEKIT_RTC_ALLOW_TCP_FALLBACK=${LIVEKIT_RTC_ALLOW_TCP_FALLBACK}$" .env
+grep -q "^LIVEKIT_RTC_STRICT_ACKS=${LIVEKIT_RTC_STRICT_ACKS}$" .env
 grep -q "^LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}$" .env
 grep -q "^LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR=${LIVEKIT_RECONNECT_ON_PUBLICATION_ERROR}$" .env
 grep -q "^LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR=${LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ERROR}$" .env
@@ -1923,6 +1970,15 @@ grep -q "reconnect_on_subscription_error: ${LIVEKIT_RECONNECT_ON_SUBSCRIPTION_ER
 grep -q "reconnect_on_data_channel_error: ${LIVEKIT_RECONNECT_ON_DATA_CHANNEL_ERROR}" data/livekit/config.yaml
 grep -q "^turn:$" data/livekit/config.yaml
 grep -q "enabled: ${LIVEKIT_TURN_ENABLED}" data/livekit/config.yaml
+grep -q "allow_tcp_fallback: ${LIVEKIT_RTC_ALLOW_TCP_FALLBACK}" data/livekit/config.yaml
+grep -q "strict_acks: ${LIVEKIT_RTC_STRICT_ACKS}" data/livekit/config.yaml
+grep -q "domain: ${MATRIX_DOMAIN}" data/livekit/config.yaml
+grep -q "udp_port: ${LIVEKIT_TURN_UDP_PORT}" data/livekit/config.yaml
+grep -q "tls_port: ${LIVEKIT_TURN_TLS_PORT}" data/livekit/config.yaml
+grep -q "relay_range_start: ${LIVEKIT_TURN_RELAY_RANGE_START}" data/livekit/config.yaml
+grep -q "relay_range_end: ${LIVEKIT_TURN_RELAY_RANGE_END}" data/livekit/config.yaml
+grep -q "cert_file: /etc/lk-certs/live/${MATRIX_DOMAIN}/fullchain.pem" data/livekit/config.yaml
+grep -q "key_file: /etc/lk-certs/live/${MATRIX_DOMAIN}/privkey.pem" data/livekit/config.yaml
 grep -Fq 'image: ${POSTGRES_IMAGE}' docker-compose.yml
 grep -Fq 'container_name: ${DB_HOST}' docker-compose.yml
 grep -Fq '${POSTGRES_DATA_PATH}:/var/lib/postgresql/data' docker-compose.yml
@@ -1931,6 +1987,9 @@ grep -Fq 'image: ${KETESA_IMAGE}' docker-compose.yml
 grep -Fq '${KETESA_CONFIG_PATH}:/var/public/config.json:ro' docker-compose.yml
 grep -Fq '${LIVEKIT_TCP_PORT}:${LIVEKIT_TCP_PORT}/tcp' docker-compose.yml
 grep -Fq '${LIVEKIT_RTC_PORT_RANGE_START}-${LIVEKIT_RTC_PORT_RANGE_END}:${LIVEKIT_RTC_PORT_RANGE_START}-${LIVEKIT_RTC_PORT_RANGE_END}/udp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_UDP_PORT}:${LIVEKIT_TURN_UDP_PORT}/udp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_TLS_PORT}:${LIVEKIT_TURN_TLS_PORT}/tcp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}:${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}/udp' docker-compose.yml
 grep -q "element-web:" docker-compose.yml
 grep -q "server_name ${MATRIX_DOMAIN};" "${NGINX_DEFAULT_CONF_LOCAL_PATH}"
 grep -q "location = /_matrix/client/unstable/org.matrix.msc4143/rtc/transports" "${NGINX_DEFAULT_CONF_LOCAL_PATH}"
@@ -2096,6 +2155,9 @@ echo
 echo " 1) Firewall"
 echo "   Allow UDP ${LIVEKIT_RTC_PORT_RANGE_START}-${LIVEKIT_RTC_PORT_RANGE_END}"
 echo "   Allow TCP ${LIVEKIT_TCP_PORT}"
+echo "   Allow UDP ${LIVEKIT_TURN_UDP_PORT}                           (TURN/UDP)"
+echo "   Allow TCP ${LIVEKIT_TURN_TLS_PORT}                           (TURNS/TLS - critical for mobile NAT)"
+echo "   Allow UDP ${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}    (TURN relay range)"
 echo
 echo " 2) Nginx"
 echo "   Copy these files into your existing nginx-proxy container config:"
