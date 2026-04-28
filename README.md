@@ -32,11 +32,7 @@ The script will ask for:
 
 ### 1. Open Firewall Ports
 
-- Allow UDP `50201-50501`
-- Allow TCP `7881`
-- Allow UDP `3478`
-- Allow TCP `5349`
-- Allow UDP `50502-50601`
+- Allow UDP `7882`
 
 ### 2. Copy Nginx Files
 
