@@ -191,9 +191,6 @@ fi
 LIVEKIT_URL_PATH="/livekit/sfu"
 LIVEKIT_JWT_BASE_PATH="/livekit/jwt"
 
-# Path on HOST to the certs directory containing live/ and archive/ subdirs.
-# Kept mounted for future TURN/TLS use, but the stable default below does not enable TURN.
-LIVEKIT_TLS_CERT_DIR="/root/nginx-proxy/certs"
 LIVEKIT_RTC_UDP_PORT="7882"
 LIVEKIT_TCP_PORT="7881"
 LIVEKIT_USE_EXTERNAL_IP="false"
@@ -594,7 +591,6 @@ LIVEKIT_API_KEY=${LK_API_KEY}
 LIVEKIT_SECRET_KEY=${LK_SECRET}
 LIVEKIT_URL=wss://${MATRIX_DOMAIN}${LIVEKIT_URL_PATH}
 LIVEKIT_JWT_BASE_URL=https://${MATRIX_DOMAIN}${LIVEKIT_JWT_BASE_PATH}
-LIVEKIT_TLS_CERT_DIR=${LIVEKIT_TLS_CERT_DIR}
 LIVEKIT_RTC_UDP_PORT=${LIVEKIT_RTC_UDP_PORT}
 LIVEKIT_TCP_PORT=${LIVEKIT_TCP_PORT}
 LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}
@@ -1886,7 +1882,6 @@ grep -q "\"feature_element_call_video_rooms\": true" data/element-web/config.jso
 grep -q "\"use_exclusively\": true" data/element-web/config.json
 grep -q "^LIVEKIT_URL=wss://${MATRIX_DOMAIN}${LIVEKIT_URL_PATH}$" .env
 grep -q "^LIVEKIT_JWT_BASE_URL=https://${MATRIX_DOMAIN}${LIVEKIT_JWT_BASE_PATH}$" .env
-grep -q "^LIVEKIT_TLS_CERT_DIR=" .env
 grep -q "^LIVEKIT_RTC_UDP_PORT=${LIVEKIT_RTC_UDP_PORT}$" .env
 grep -q "^LIVEKIT_TCP_PORT=${LIVEKIT_TCP_PORT}$" .env
 grep -q "^LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}$" .env
