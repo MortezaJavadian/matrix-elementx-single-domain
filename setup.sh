@@ -195,6 +195,17 @@ LIVEKIT_RTC_UDP_PORT="7882"
 LIVEKIT_TCP_PORT="7881"
 LIVEKIT_USE_EXTERNAL_IP="false"
 LIVEKIT_ENABLE_LOOPBACK_CANDIDATE="false"
+LIVEKIT_ALLOW_TCP_FALLBACK="true"
+LIVEKIT_TURN_ENABLED="true"
+LIVEKIT_TURN_DOMAIN="${MATRIX_DOMAIN}"
+LIVEKIT_TURN_UDP_PORT="3478"
+LIVEKIT_TURN_TLS_PORT="5349"
+LIVEKIT_TURN_RELAY_RANGE_START="52000"
+LIVEKIT_TURN_RELAY_RANGE_END="52049"
+LIVEKIT_TURN_EXTERNAL_TLS="false"
+LIVEKIT_TLS_CERT_DIR="${HOME}/nginx-proxy/certs"
+LIVEKIT_TURN_CERT_FILE="/etc/lk-certs/live/${MATRIX_DOMAIN}/fullchain.pem"
+LIVEKIT_TURN_KEY_FILE="/etc/lk-certs/live/${MATRIX_DOMAIN}/privkey.pem"
 LIVEKIT_LOG_JSON="false"
 LIVEKIT_LOG_LEVEL="info"
 
@@ -231,6 +242,13 @@ ADMIN_ALLOWLIST_TARGET_PATH="~/nginx-proxy/conf.d/snippets/admin-allowlist.inc"
 if (( REGENERATE_NGINX_ONLY == 0 )); then
   mkdir -p data/postgres data/synapse data/mas data/livekit data/ketesa data/element-web scripts conf.d conf.d/snippets
   chmod 755 data data/postgres data/synapse data/mas data/livekit data/ketesa data/element-web scripts conf.d conf.d/snippets
+
+  if [[ ! -f "${LIVEKIT_TLS_CERT_DIR}/live/${MATRIX_DOMAIN}/fullchain.pem" || ! -f "${LIVEKIT_TLS_CERT_DIR}/live/${MATRIX_DOMAIN}/privkey.pem" ]]; then
+    echo "[!] LiveKit TURN TLS certificate files not found."
+    echo "    Expected: ${LIVEKIT_TLS_CERT_DIR}/live/${MATRIX_DOMAIN}/fullchain.pem and ${LIVEKIT_TLS_CERT_DIR}/live/${MATRIX_DOMAIN}/privkey.pem"
+    echo "    Make sure nginx-proxy certificates exist before running full setup."
+    exit 1
+  fi
 else
   mkdir -p conf.d conf.d/snippets
   chmod 755 conf.d conf.d/snippets
@@ -595,6 +613,17 @@ LIVEKIT_RTC_UDP_PORT=${LIVEKIT_RTC_UDP_PORT}
 LIVEKIT_TCP_PORT=${LIVEKIT_TCP_PORT}
 LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}
 LIVEKIT_ENABLE_LOOPBACK_CANDIDATE=${LIVEKIT_ENABLE_LOOPBACK_CANDIDATE}
+LIVEKIT_ALLOW_TCP_FALLBACK=${LIVEKIT_ALLOW_TCP_FALLBACK}
+LIVEKIT_TURN_ENABLED=${LIVEKIT_TURN_ENABLED}
+LIVEKIT_TURN_DOMAIN=${LIVEKIT_TURN_DOMAIN}
+LIVEKIT_TURN_UDP_PORT=${LIVEKIT_TURN_UDP_PORT}
+LIVEKIT_TURN_TLS_PORT=${LIVEKIT_TURN_TLS_PORT}
+LIVEKIT_TURN_RELAY_RANGE_START=${LIVEKIT_TURN_RELAY_RANGE_START}
+LIVEKIT_TURN_RELAY_RANGE_END=${LIVEKIT_TURN_RELAY_RANGE_END}
+LIVEKIT_TURN_EXTERNAL_TLS=${LIVEKIT_TURN_EXTERNAL_TLS}
+LIVEKIT_TLS_CERT_DIR=${LIVEKIT_TLS_CERT_DIR}
+LIVEKIT_TURN_CERT_FILE=${LIVEKIT_TURN_CERT_FILE}
+LIVEKIT_TURN_KEY_FILE=${LIVEKIT_TURN_KEY_FILE}
 LIVEKIT_LOG_JSON=${LIVEKIT_LOG_JSON}
 LIVEKIT_LOG_LEVEL=${LIVEKIT_LOG_LEVEL}
 SYNAPSE_IMAGE=${SYNAPSE_IMAGE}
@@ -745,8 +774,13 @@ services:
     command: ["--config", "/etc/livekit/config.yaml", "--node-ip", "\${SERVER_IP}"]
     volumes:
       - \${LIVEKIT_DATA_PATH}:/etc/livekit:ro
+      - \${LIVEKIT_TLS_CERT_DIR}:/etc/lk-certs:ro
     ports:
+      - "\${LIVEKIT_TCP_PORT}:\${LIVEKIT_TCP_PORT}/tcp"
       - "\${LIVEKIT_RTC_UDP_PORT}:\${LIVEKIT_RTC_UDP_PORT}/udp"
+      - "\${LIVEKIT_TURN_UDP_PORT}:\${LIVEKIT_TURN_UDP_PORT}/udp"
+      - "\${LIVEKIT_TURN_TLS_PORT}:\${LIVEKIT_TURN_TLS_PORT}/tcp"
+      - "\${LIVEKIT_TURN_RELAY_RANGE_START}-\${LIVEKIT_TURN_RELAY_RANGE_END}:\${LIVEKIT_TURN_RELAY_RANGE_START}-\${LIVEKIT_TURN_RELAY_RANGE_END}/udp"
     networks:
       matrix-internal:
         aliases:
@@ -1081,6 +1115,18 @@ rtc:
   tcp_port: ${LIVEKIT_TCP_PORT}
   use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP}
   enable_loopback_candidate: ${LIVEKIT_ENABLE_LOOPBACK_CANDIDATE}
+  allow_tcp_fallback: ${LIVEKIT_ALLOW_TCP_FALLBACK}
+
+turn:
+  enabled: ${LIVEKIT_TURN_ENABLED}
+  domain: ${LIVEKIT_TURN_DOMAIN}
+  udp_port: ${LIVEKIT_TURN_UDP_PORT}
+  tls_port: ${LIVEKIT_TURN_TLS_PORT}
+  relay_range_start: ${LIVEKIT_TURN_RELAY_RANGE_START}
+  relay_range_end: ${LIVEKIT_TURN_RELAY_RANGE_END}
+  external_tls: ${LIVEKIT_TURN_EXTERNAL_TLS}
+  cert_file: ${LIVEKIT_TURN_CERT_FILE}
+  key_file: ${LIVEKIT_TURN_KEY_FILE}
 
 keys:
   ${LK_API_KEY}: "${LK_SECRET}"
@@ -1886,6 +1932,17 @@ grep -q "^LIVEKIT_RTC_UDP_PORT=${LIVEKIT_RTC_UDP_PORT}$" .env
 grep -q "^LIVEKIT_TCP_PORT=${LIVEKIT_TCP_PORT}$" .env
 grep -q "^LIVEKIT_USE_EXTERNAL_IP=${LIVEKIT_USE_EXTERNAL_IP}$" .env
 grep -q "^LIVEKIT_ENABLE_LOOPBACK_CANDIDATE=${LIVEKIT_ENABLE_LOOPBACK_CANDIDATE}$" .env
+grep -q "^LIVEKIT_ALLOW_TCP_FALLBACK=${LIVEKIT_ALLOW_TCP_FALLBACK}$" .env
+grep -q "^LIVEKIT_TURN_ENABLED=${LIVEKIT_TURN_ENABLED}$" .env
+grep -q "^LIVEKIT_TURN_DOMAIN=${LIVEKIT_TURN_DOMAIN}$" .env
+grep -q "^LIVEKIT_TURN_UDP_PORT=${LIVEKIT_TURN_UDP_PORT}$" .env
+grep -q "^LIVEKIT_TURN_TLS_PORT=${LIVEKIT_TURN_TLS_PORT}$" .env
+grep -q "^LIVEKIT_TURN_RELAY_RANGE_START=${LIVEKIT_TURN_RELAY_RANGE_START}$" .env
+grep -q "^LIVEKIT_TURN_RELAY_RANGE_END=${LIVEKIT_TURN_RELAY_RANGE_END}$" .env
+grep -q "^LIVEKIT_TURN_EXTERNAL_TLS=${LIVEKIT_TURN_EXTERNAL_TLS}$" .env
+grep -q "^LIVEKIT_TLS_CERT_DIR=${LIVEKIT_TLS_CERT_DIR}$" .env
+grep -q "^LIVEKIT_TURN_CERT_FILE=${LIVEKIT_TURN_CERT_FILE}$" .env
+grep -q "^LIVEKIT_TURN_KEY_FILE=${LIVEKIT_TURN_KEY_FILE}$" .env
 grep -q "^LIVEKIT_LOG_JSON=${LIVEKIT_LOG_JSON}$" .env
 grep -q "^LIVEKIT_LOG_LEVEL=${LIVEKIT_LOG_LEVEL}$" .env
 grep -q "^KETESA_IMAGE=${KETESA_IMAGE}$" .env
@@ -1903,6 +1960,16 @@ grep -q "udp_port: ${LIVEKIT_RTC_UDP_PORT}" data/livekit/config.yaml
 grep -q "tcp_port: ${LIVEKIT_TCP_PORT}" data/livekit/config.yaml
 grep -q "use_external_ip: ${LIVEKIT_USE_EXTERNAL_IP}" data/livekit/config.yaml
 grep -q "enable_loopback_candidate: ${LIVEKIT_ENABLE_LOOPBACK_CANDIDATE}" data/livekit/config.yaml
+grep -q "allow_tcp_fallback: ${LIVEKIT_ALLOW_TCP_FALLBACK}" data/livekit/config.yaml
+grep -q "enabled: ${LIVEKIT_TURN_ENABLED}" data/livekit/config.yaml
+grep -q "domain: ${LIVEKIT_TURN_DOMAIN}" data/livekit/config.yaml
+grep -q "udp_port: ${LIVEKIT_TURN_UDP_PORT}" data/livekit/config.yaml
+grep -q "tls_port: ${LIVEKIT_TURN_TLS_PORT}" data/livekit/config.yaml
+grep -q "relay_range_start: ${LIVEKIT_TURN_RELAY_RANGE_START}" data/livekit/config.yaml
+grep -q "relay_range_end: ${LIVEKIT_TURN_RELAY_RANGE_END}" data/livekit/config.yaml
+grep -q "external_tls: ${LIVEKIT_TURN_EXTERNAL_TLS}" data/livekit/config.yaml
+grep -q "cert_file: ${LIVEKIT_TURN_CERT_FILE}" data/livekit/config.yaml
+grep -q "key_file: ${LIVEKIT_TURN_KEY_FILE}" data/livekit/config.yaml
 grep -q "json: ${LIVEKIT_LOG_JSON}" data/livekit/config.yaml
 grep -q "level: ${LIVEKIT_LOG_LEVEL}" data/livekit/config.yaml
 grep -Fq 'image: ${POSTGRES_IMAGE}' docker-compose.yml
@@ -1911,7 +1978,12 @@ grep -Fq '${POSTGRES_DATA_PATH}:/var/lib/postgresql/data' docker-compose.yml
 grep -Fq '${POSTGRES_INIT_SQL_PATH}:/docker-entrypoint-initdb.d/01-init.sql:ro' docker-compose.yml
 grep -Fq 'image: ${KETESA_IMAGE}' docker-compose.yml
 grep -Fq '${KETESA_CONFIG_PATH}:/var/public/config.json:ro' docker-compose.yml
+grep -Fq '${LIVEKIT_TLS_CERT_DIR}:/etc/lk-certs:ro' docker-compose.yml
+grep -Fq '${LIVEKIT_TCP_PORT}:${LIVEKIT_TCP_PORT}/tcp' docker-compose.yml
 grep -Fq '${LIVEKIT_RTC_UDP_PORT}:${LIVEKIT_RTC_UDP_PORT}/udp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_UDP_PORT}:${LIVEKIT_TURN_UDP_PORT}/udp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_TLS_PORT}:${LIVEKIT_TURN_TLS_PORT}/tcp' docker-compose.yml
+grep -Fq '${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}:${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}/udp' docker-compose.yml
 grep -q "element-web:" docker-compose.yml
 grep -q "server_name ${MATRIX_DOMAIN};" "${NGINX_DEFAULT_CONF_LOCAL_PATH}"
 grep -q "location = /_matrix/client/unstable/org.matrix.msc4143/rtc/transports" "${NGINX_DEFAULT_CONF_LOCAL_PATH}"
@@ -2041,6 +2113,8 @@ echo "[*] Smoke testing LiveKit and MatrixRTC helper reachability..."
 ensure_container_on_nginx_network "${LIVEKIT_HOST}"
 ensure_container_on_nginx_network "${LIVEKIT_JWT_HOST}"
 test_tcp_from_synapse "${LIVEKIT_HOST}" 7880 "LiveKit SFU"
+test_tcp_from_synapse "${LIVEKIT_HOST}" "${LIVEKIT_TCP_PORT}" "LiveKit ICE TCP fallback"
+test_tcp_from_synapse "${LIVEKIT_HOST}" "${LIVEKIT_TURN_TLS_PORT}" "LiveKit TURN TLS"
 test_http_from_synapse "http://${LIVEKIT_JWT_HOST}:8080/healthz" "LiveKit JWT health"
 
 # Give services a short silent stabilization window before final health gate.
@@ -2076,6 +2150,10 @@ echo " Next steps:"
 echo
 echo " 1) Firewall"
 echo "   Allow UDP ${LIVEKIT_RTC_UDP_PORT}"
+echo "   Allow TCP ${LIVEKIT_TCP_PORT}"
+echo "   Allow UDP ${LIVEKIT_TURN_UDP_PORT}"
+echo "   Allow TCP ${LIVEKIT_TURN_TLS_PORT}"
+echo "   Allow UDP ${LIVEKIT_TURN_RELAY_RANGE_START}-${LIVEKIT_TURN_RELAY_RANGE_END}"
 echo
 echo " 2) Nginx"
 echo "   Copy these files into your existing nginx-proxy container config:"
